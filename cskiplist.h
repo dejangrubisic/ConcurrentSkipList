@@ -17,7 +17,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "mcs-lock.h"
-
+#include <stdatomic.h>
 
 
 //******************************************************************************
@@ -34,6 +34,7 @@ typedef struct csklnode_t {
   void *item;
   int height;
   volatile bool deleted;
+  atomic_uint version;
   mcs_lock_t lock;
   // memory allocated for a node will include space for its vector of  pointers
   struct csklnode_t *nexts[];

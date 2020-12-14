@@ -20,6 +20,14 @@
 #define mcs_nil (struct mcs_node_s*) 0
 #define MAX_LEVEL 10
 
+#define KNRM  "\x1B[0m"
+#define KRED  "\x1B[31m"
+#define KGRN  "\x1B[32m"
+#define KYEL  "\x1B[33m"
+#define KBLU  "\x1B[34m"
+#define KMAG  "\x1B[35m"
+#define KCYN  "\x1B[36m"
+#define KWHT  "\x1B[37m"
 
 //******************************************************************************
 // implementation types
@@ -51,6 +59,7 @@ csklnode_create
   node->key = key;
   node->item = item_deep_copy && item ? item_deep_copy(item) : item; // check if both deep_copy and items are defined
   node->height = 0;
+  atomic_store(&node->version, 0);
   node->deleted = false;
   mcs_init(&(node->lock));
   for (int i = 0; i < max_height; ++i) {
@@ -213,12 +222,15 @@ cskiplist_put_specific
   csklnode_t *next_node = prev_nodes[0]->nexts[0];
 
   if (prev_nodes[0]->deleted || prev_nodes[0]->key == key){
+    //Reuse prev_node if deleted
     prev_nodes[0]->item = item;
     prev_nodes[0]->deleted = false;
   }else if (next_node->deleted){
+    //Reuse next_node if deleted
     next_node->item = item;
     next_node->deleted = false;
   }else{
+    //Insert new node
     if (tower_height <= 0) tower_height = rand() % (cskl->max_height - 1)  + 1 ;
     printf("KEY: %d | height = %d\n", key, tower_height);
     cskiplist_buld_tower(new_node, tower_height, prev_nodes);
@@ -444,19 +456,19 @@ cskiplist_print(cskiplist_t* cskl)
   }
 
 
-  printf("Del:");
+  printf("%sDel:", KCYN);
   for (int i = 0; i < cskl->total_length; ++i) {
     printf("\t%c", str_deleted[i]);
   }
-  printf("\n");
+  printf("%s\n", KNRM);
 
 
-  printf("Keys:");
+  printf("%sKeys:", KYEL);
   printf("\t-inf");
   for (int i = 1; i < cskl->total_length-1; ++i) {
     printf("\t%d", keys[i]);
   }
-  printf("\t+inf\n");
+  printf("\t+inf%s\n", KNRM);
 
 
 

@@ -30,6 +30,14 @@
 #define MAX_HEIGHT 4
 #define GET_NAME(var)  #var
 
+#define KNRM  "\x1B[0m"
+#define KRED  "\x1B[31m"
+#define KGRN  "\x1B[32m"
+#define KYEL  "\x1B[33m"
+#define KBLU  "\x1B[34m"
+#define KMAG  "\x1B[35m"
+#define KCYN  "\x1B[36m"
+#define KWHT  "\x1B[37m"
 
 //******************************************************************************
 // types
@@ -118,6 +126,12 @@ test_delete
   int rand_key[] = {3, 15, 2, 3, 7,
                     7,  7, 7, 7, 0};
 
+  printf("Delete Keys: ");
+  for (int i = 0; i < 10; ++i) {
+    printf("%d, ", rand_key[i]);
+  }
+  printf("\n");
+
 #pragma omp for
   for (int i = 0; i < 10; i++) {
     cskiplist_delete_node(cskl, rand_key[i]);
@@ -146,9 +160,9 @@ run_test
   cskiplist_print(new_cskl);
 
   if (cskiplist_compare(cskl, new_cskl))
-    printf("%s: PASSED\n", test_name);
+    printf("%s: %sPASSED%s\n", test_name, KGRN, KNRM);
   else
-    printf("%s: FAILED\n", test_name);
+    printf("%s: %sFAILED%s\n", test_name, KRED, KNRM);
   printf("__________________________________________________________\n\n");
 
   cskiplist_free(new_cskl);
