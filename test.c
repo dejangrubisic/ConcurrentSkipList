@@ -109,36 +109,20 @@ test_insert
 
 // Test deletion
 void
-test1
+test_delete
 (
   cskiplist_t *cskl
 )
 {
+  // keys are going from 1 to 10
+  int rand_key[] = {3, 15, 2, 3, 7,
+                    7,  7, 7, 7, 0};
 
-#pragma omp parallel
-  {
-    int id = omp_get_thread_num();
-
-    int lo = id;
-    int hi;
-    for (int i = 0; i < 10; ++i) {
-      lo += 10;
-      hi = lo + 10;
-      cskiplist_put(cskl, lo, interval_new(lo, hi));
-
-    }
-
-    cskiplist_delete_node(cskl, 20);
-    cskiplist_delete_node(cskl, 70);
-
-    interval_t  * item = cskiplist_get(cskl, 40);
-
-    if (item != NULL)
-      printf("item on key = %d is [ %d, %d]\n", 20, item->start, item->end);
-    else
-      printf("item on key = %d is NULL\n", 20);
-//    cskiplist_put(cskl, 20, interval_new(20, 30));
+#pragma omp for
+  for (int i = 0; i < 10; i++) {
+    cskiplist_delete_node(cskl, rand_key[i]);
   }
+
 }
 
 
@@ -165,6 +149,7 @@ run_test
     printf("%s: PASSED\n", test_name);
   else
     printf("%s: FAILED\n", test_name);
+  printf("__________________________________________________________\n\n");
 
   cskiplist_free(new_cskl);
 }
@@ -190,8 +175,8 @@ char **argv
 //  }
 
   run_test(cskl, test_insert, "test_insert");
+  run_test(cskl, test_delete, "test_delete");
 
-  cskiplist_print(cskl);
   cskiplist_free(cskl);
 
 

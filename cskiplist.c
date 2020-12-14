@@ -400,7 +400,7 @@ cskiplist_print(cskiplist_t* cskl)
 
   char **str_nodes = (char**) malloc(sizeof(char*) * cskl->max_height);
   char *str_deleted = (char*) malloc(sizeof(char) * (full_len + 1));
-  int *values = (int*) malloc(sizeof(int) * (full_len + 1));
+  int *keys = (int*) malloc(sizeof(int) * (full_len + 1));
 
 
   // Initialize maps
@@ -422,7 +422,7 @@ cskiplist_print(cskiplist_t* cskl)
       str_nodes[lev][id] = 'X';
     }
 
-    values[id] = cur_node->key;
+    keys[id] = cur_node->key;
 
     if (cur_node->deleted){
       str_deleted[id] = 'd';
@@ -451,10 +451,10 @@ cskiplist_print(cskiplist_t* cskl)
   printf("\n");
 
 
-  printf("Val:");
+  printf("Keys:");
   printf("\t-inf");
   for (int i = 1; i < cskl->total_length-1; ++i) {
-    printf("\t%d", values[i]);
+    printf("\t%d", keys[i]);
   }
   printf("\t+inf\n");
 
