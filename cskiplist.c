@@ -35,6 +35,7 @@ static struct {
 
 /*
  * allocate a node of a specified max_height.
+ * If item_deep_copy provided make a deep copy, otherwise just copy void *
  */
 static csklnode_t *
 csklnode_create
@@ -42,12 +43,13 @@ csklnode_create
   int key,
   void *item,
   int max_height,
-  mem_alloc m_alloc
+  mem_alloc_fn m_alloc,
+  item_copy_fn item_deep_copy
 )
 {
   csklnode_t* node = (csklnode_t*)m_alloc(SIZEOF_CSKLNODE_T(max_height));
   node->key = key;
-  node->item = item;
+  node->item = item_deep_copy && item ? item_deep_copy(item) : item; // check if both deep_copy and items are defined
   node->height = 0;
   node->deleted = false;
   mcs_init(&(node->lock));
@@ -69,16 +71,6 @@ csklnode_set_next
     node->height++;
   }
   node->nexts[lev] = next;
-
-}
-
-static void
-cskipnode_free
-(
-  csklnode_t *node
-)
-{
-  free(node->item);
 }
 
 
@@ -103,6 +95,33 @@ cskipnode_next_alive
   node = node->nexts[lev];
   while (node->deleted) node = node->nexts[lev];
   return node;
+}
+
+static bool
+csklnode_compare
+(
+  csklnode_t *node1,
+  csklnode_t *node2,
+  item_compare_fn i_cmp
+)
+{
+  if (node1->key == node2->key &&
+      node1->deleted == node2->deleted &&
+      node1->item && node2->item && // check just in case that items are not NULL
+      i_cmp(node1->item, node2->item)){
+    return true;
+  }
+  return false;
+}
+
+
+static void
+cskipnode_free
+(
+csklnode_t *node
+)
+{
+  free(node->item);
 }
 
 
@@ -166,8 +185,8 @@ cskip_insert_dumy_nodes
   cskiplist_t *cskl
 )
 {
-  csklnode_t *head = csklnode_create(INT_MIN, NULL, cskl->max_height, cskl->m_alloc);
-  csklnode_t *tail = csklnode_create(INT_MAX, NULL, cskl->max_height, cskl->m_alloc);
+  csklnode_t *head = csklnode_create(INT_MIN, NULL, cskl->max_height, cskl->m_alloc, NULL);
+  csklnode_t *tail = csklnode_create(INT_MAX, NULL, cskl->max_height, cskl->m_alloc, NULL);
 
   for (int i = 0; i < cskl->max_height; ++i) {
     csklnode_set_next(head, i, tail);
@@ -177,6 +196,39 @@ cskip_insert_dumy_nodes
 }
 
 
+static void
+cskiplist_put_specific
+(
+  cskiplist_t* cskl,
+  int key,
+  void *item,
+  int tower_height,
+  item_copy_fn item_deep_copy
+)
+{
+  // allocate my node
+  csklnode_t *new_node = csklnode_create(key, item, cskl->max_height, cskl->m_alloc, item_deep_copy);
+
+  csklnode_t **prev_nodes = cskip_find_prev_nodes(cskl, key);
+  csklnode_t *next_node = prev_nodes[0]->nexts[0];
+
+  if (prev_nodes[0]->deleted || prev_nodes[0]->key == key){
+    prev_nodes[0]->item = item;
+    prev_nodes[0]->deleted = false;
+  }else if (next_node->deleted){
+    next_node->item = item;
+    next_node->deleted = false;
+  }else{
+    if (tower_height <= 0) tower_height = rand() % (cskl->max_height - 1)  + 1 ;
+    printf("KEY: %d | height = %d\n", key, tower_height);
+    cskiplist_buld_tower(new_node, tower_height, prev_nodes);
+    cskl->total_length++;
+
+  }
+  cskl->length++;
+
+  free(prev_nodes);
+}
 
 //******************************************************************************
 // interface operations
@@ -187,7 +239,9 @@ cskiplist_t *
 cskiplist_create
 (
   int max_height,
-  mem_alloc m_alloc
+  mem_alloc_fn m_alloc,
+  item_copy_fn i_copy,
+  item_compare_fn i_cmp
 )
 {
   cskiplist_t* cskl = (cskiplist_t*)m_alloc(sizeof(cskiplist_t));
@@ -195,6 +249,8 @@ cskiplist_create
   cskl->length = 0;
   cskl->total_length = 2;
   cskl->m_alloc = m_alloc;
+  cskl->i_copy = i_copy;
+  cskl->i_cmp = i_cmp;
   cskl->max_height = max_height;
   mcs_init(&cskl->lock);
 
@@ -228,38 +284,18 @@ cskiplist_free
 /*
  * Inserts node instead of deleted node, or node with the same key with their height,
  * or creates new node with specified/random height(if spec==0)
+ * Create a shell copy of item
  */
+
 void
 cskiplist_put
 (
   cskiplist_t* cskl,
   int key,
-  void *item,
-  int tower_height
+  void *item
 )
 {
-  // allocate my node
-  csklnode_t *new_node = csklnode_create(key, item, cskl->max_height, cskl->m_alloc);
-
-  csklnode_t **prev_nodes = cskip_find_prev_nodes(cskl, key);
-  csklnode_t *next_node = prev_nodes[0]->nexts[0];
-
-  if (prev_nodes[0]->deleted || prev_nodes[0]->key == key){
-    prev_nodes[0]->item = item;
-    prev_nodes[0]->deleted = false;
-  }else if (next_node->deleted){
-    next_node->item = item;
-    next_node->deleted = false;
-  }else{
-    if (tower_height <= 0) tower_height = rand() % (cskl->max_height - 1)  + 1 ;
-    printf("KEY: %d | height = %d\n", key, tower_height);
-    cskiplist_buld_tower(new_node, tower_height, prev_nodes);
-    cskl->total_length++;
-
-  }
-  cskl->length++;
-
-  free(prev_nodes);
+  cskiplist_put_specific(cskl, key, item, 0, NULL);
 }
 
 
@@ -295,19 +331,67 @@ cskiplist_delete_node
 }
 
 
+/*
+ * This is shallow copy, as the copy nodes will point to the same items
+ */
 cskiplist_t *
 cskiplist_copy
 (
   cskiplist_t* cskl
 )
 {
-  cskiplist_t* new_cskl = cskiplist_create(cskl->max_height, cskl->m_alloc);
+  cskiplist_t* new_cskl = cskiplist_create(cskl->max_height, cskl->m_alloc, cskl->i_copy, cskl->i_cmp);
 
-  for (csklnode_t *cur_node=cskl->head_ptr; cur_node->nexts[0] != NULL; cur_node = cur_node->nexts[0]) {
-    cskiplist_put(new_cskl, cur_node->key, cur_node->item, cur_node->height);
+  for (csklnode_t *cur_node=cskl->head_ptr->nexts[0]; cur_node->nexts[0] != NULL; cur_node = cur_node->nexts[0]) {
+    cskiplist_put_specific(new_cskl, cur_node->key, cur_node->item, cur_node->height, NULL);
+  }
+  return new_cskl;
+}
+
+
+cskiplist_t *
+cskiplist_copy_deep
+(
+cskiplist_t* cskl
+)
+{
+  cskiplist_t* new_cskl = cskiplist_create(cskl->max_height, cskl->m_alloc, cskl->i_copy, cskl->i_cmp);
+
+  // Dummy nodes are already there, so start inserting from node 1
+  for (csklnode_t *cur_node=cskl->head_ptr->nexts[0]; cur_node->nexts[0] != NULL; cur_node = cur_node->nexts[0]) {
+    cskiplist_put_specific(new_cskl, cur_node->key, cur_node->item, cur_node->height, cskl->i_copy);
+  }
+  return new_cskl;
+}
+
+
+bool
+cskiplist_compare
+(
+  cskiplist_t* cskl1,
+  cskiplist_t* cskl2
+)
+{
+  if (cskl1->length != cskl2->length){
+    return false;
   }
 
+  // Start comparing from first valid node
+  csklnode_t *node1=cskl1->head_ptr->nexts[0];
+  csklnode_t *node2=cskl2->head_ptr->nexts[0];
+
+  while (node1->nexts[0] != NULL || node2->nexts[0] != NULL) {
+    if (csklnode_compare(node1, node2, cskl1->i_cmp) == false){
+      return false;
+    }
+    node1 = node1->nexts[0];
+    node2 = node2->nexts[0];
+
+  }
+  return true;
 }
+
+
 
 void
 cskiplist_print(cskiplist_t* cskl)

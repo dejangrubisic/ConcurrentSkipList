@@ -24,7 +24,9 @@
 // implementation types
 //******************************************************************************
 
-typedef void* (*mem_alloc)(size_t size);
+typedef void* (*mem_alloc_fn)(size_t size);
+typedef void* (*item_copy_fn)(void *item);
+typedef bool (*item_compare_fn)(void *item1, void *item2);
 
 
 typedef struct csklnode_t {
@@ -44,7 +46,9 @@ typedef struct cskiplist_t{
   int max_height;
   int length;
   int total_length;
-  mem_alloc m_alloc;
+  mem_alloc_fn m_alloc;
+  item_copy_fn i_copy;
+  item_compare_fn i_cmp;
   mcs_lock_t lock;
 } cskiplist_t;
 
@@ -58,7 +62,9 @@ cskiplist_t *
 cskiplist_create
 (
   int max_height,
-  mem_alloc m_alloc
+  mem_alloc_fn m_alloc,
+  item_copy_fn i_copy,
+  item_compare_fn i_cmp
 );
 
 
@@ -74,8 +80,7 @@ cskiplist_put
 (
   cskiplist_t* cskl,
   int key,
-  void *item,
-  int tower_height
+  void *item
 );
 
 
@@ -99,6 +104,21 @@ cskiplist_t *
 cskiplist_copy
 (
   cskiplist_t* cskl
+);
+
+
+cskiplist_t *
+cskiplist_copy_deep
+(
+cskiplist_t* cskl
+);
+
+
+bool
+cskiplist_compare
+(
+  cskiplist_t* cskl1,
+  cskiplist_t* cskl2
 );
 
 
