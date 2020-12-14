@@ -39,7 +39,7 @@ void *start;
 void *end;
 } interval_t;
 
-
+typedef void (*test_fn)(cskiplist_t *cskl);
 
 //******************************************************************************
 // private operations
@@ -62,32 +62,83 @@ long end_l
 
 
 
+// Test insertion
+void
+test_insert
+(
+  cskiplist_t *cskl
+)
+{
+    int id = omp_get_thread_num();
 
-//static void
-//build_test
-//(
-//cskiplist_t *list,
-//int len,
-//char* s,
-//int reversed
-//)
-//{
-//  printf("Filling list of length %d ...\n", len);
-//
-//  printf("before ...\n");
-//  cskl_dump(list, interval_cskiplist_node_tostr);
-//
-//  ptrdiff_t i;
-//  for (i = len; i > 0; i = i -10) {
-//    ptrdiff_t lo = reversed ? i: len - i;
-//    interval_t *e = interval_new((uintptr_t)(s+lo), (uintptr_t)(s+lo+8));
-//    cskl_insert(list, e, malloc);
-//  }
-//
-//  printf("after ...\n");
-//  cskl_dump(list, interval_cskiplist_node_tostr);
-//}
+    int lo = id;
+    int hi;
+    for (int i = 0; i < 10; ++i) {
+      lo += 10;
+      hi = lo + 10;
+      cskiplist_put(cskl, lo, interval_new(lo, hi), 0);
+    }
 
+}
+
+
+// Test deletion
+void
+test1
+(
+  cskiplist_t *cskl
+)
+{
+
+#pragma omp parallel
+  {
+    int id = omp_get_thread_num();
+
+    int lo = id;
+    int hi;
+    for (int i = 0; i < 10; ++i) {
+      lo += 10;
+      hi = lo + 10;
+      cskiplist_put(cskl, lo, interval_new(lo, hi), 0);
+
+    }
+
+    cskiplist_delete_node(cskl, 20);
+    cskiplist_delete_node(cskl, 70);
+
+    interval_t  * item = cskiplist_get(cskl, 40);
+
+    if (item != NULL)
+      printf("item on key = %d is [ %d, %d]\n", 20, item->start, item->end);
+    else
+      printf("item on key = %d is NULL\n", 20);
+//    cskiplist_put(cskl, 20, interval_new(20, 30), 0);
+  }
+}
+
+
+
+static bool
+check_test
+(
+  cskiplist_t *cskl,
+  test_fn test
+)
+{
+
+#pragma omp parallel
+  {
+    test(cskl);
+  }
+  cskiplist_print(cskl);
+
+  cskiplist_t *new_cskl = cskiplist_copy(cskl);
+
+  cskiplist_print(cskl);
+
+//  test(cskl);
+  cskiplist_free(new_cskl);
+}
 
 
 //******************************************************************************
@@ -102,40 +153,18 @@ char **argv
 )
 {
   mem_alloc m_alloc = &malloc;
-  cskiplist_t *cslist = cskiplist_create(MAX_HEIGHT, m_alloc);
+  cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, m_alloc);
 
-  cskiplist_print(cslist);
+//#pragma omp parallel
+//  {
+//    test_insert(cskl);
+//  }
 
+  check_test(cskl, test_insert);
 
-#if 1
-#pragma omp parallel
-  {
-    int id = omp_get_thread_num();
+  cskiplist_print(cskl);
+  cskiplist_free(cskl);
 
-    int lo = id;
-    int hi;
-    for (int i = 0; i < 10; ++i) {
-      lo += 10;
-      hi = lo + 10;
-      cskiplist_put(cslist, lo, interval_new(lo, hi));
-      cskiplist_print(cslist);
-
-    }
-
-    cskiplist_delete_node(cslist, 20);
-    cskiplist_delete_node(cslist, 70);
-    cskiplist_put(cslist, 20, interval_new(20, 30));
-  }
-  cskiplist_print(cslist);
-  cskiplist_free(cslist);
-
-#else
-
-//  build_test(cs, 100, 0, 4);
-
-  cskl_check_dump(cs, interval_cskiplist_node_tostr);
-
-#endif
 
   return 0;
 }

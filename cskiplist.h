@@ -19,6 +19,11 @@
 #include "mcs-lock.h"
 
 
+
+//******************************************************************************
+// implementation types
+//******************************************************************************
+
 typedef void* (*mem_alloc)(size_t size);
 
 
@@ -44,6 +49,11 @@ typedef struct cskiplist_t{
 } cskiplist_t;
 
 
+
+//******************************************************************************
+// interface operations
+//******************************************************************************
+
 cskiplist_t *
 cskiplist_create
 (
@@ -64,7 +74,8 @@ cskiplist_put
 (
   cskiplist_t* cskl,
   int key,
-  void *item
+  void *item,
+  int tower_height
 );
 
 
@@ -81,6 +92,13 @@ cskiplist_delete_node
 (
   cskiplist_t* cskl,
   int key
+);
+
+
+cskiplist_t *
+cskiplist_copy
+(
+  cskiplist_t* cskl
 );
 
 
