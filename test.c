@@ -154,6 +154,36 @@ test_delete
 }
 
 
+// Test both insert and delete
+void
+test_random
+(
+cskiplist_t *cskl
+)
+{
+  // keys are going from 0 to num_range
+  int num_range = 10;
+
+  int my_id = omp_get_thread_num();
+
+#pragma omp single
+  printf("RANDOM TEST\n\n");
+
+#pragma omp for
+  for (int i = 0; i < num_range; i++) {
+    int new_key = rand() % num_range;
+    if (rand() % 1){
+      printf("T%d: put [ key = %d]\n", my_id, new_key);
+      cskiplist_put(cskl, new_key, interval_new(new_key, new_key + 10));
+    }else{
+      printf("T%d: delete [ key = %d]\n", my_id, new_key);
+      cskiplist_delete_node(cskl, new_key);
+    }
+  }
+
+}
+
+
 static void
 run_test
 (
@@ -199,6 +229,9 @@ char **argv
 
   run_test(cskl, test_insert, "test_insert");
   run_test(cskl, test_delete, "test_delete");
+
+  run_test(cskl, test_random, "test_random");
+
 
   cskiplist_free(cskl);
 

@@ -29,16 +29,6 @@ typedef void* (*item_copy_fn)(void *item);
 typedef bool (*item_compare_fn)(void *item1, void *item2);
 
 
-//typedef struct {
-//  unsigned long deleted : 1;  // delete flag
-//  unsigned long ptr : 63;     // void *
-//}node_item_t;
-
-typedef struct {
-  bool deleted;  // delete flag
-  void *ptr;     // void *
-}node_item_t;
-
 
 typedef struct csklnode_t {
   int key;

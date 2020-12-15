@@ -74,7 +74,7 @@ csklitem_put
   bool copy_deep_flag
 )
 {
-  void *node_item = copy_deep_flag ? cskl->i_copy(item):(item);
+  void *node_item = copy_deep_flag && item ? cskl->i_copy(item):(item);
   atomic_store(&node->item, node_item);
 }
 
@@ -246,20 +246,24 @@ cskiplist_buld_tower
     while (!CAS(&prev_nodes->ptrs[lev]->nexts[lev],
                 &prev_nodes->old_nexts[lev], new_node)){
 
-      cur_prev = cskipnode_next(prev_nodes->ptrs[lev], lev); // move cur_prev to next node
+      // New node is not positioned well
+      do {
+        cur_prev = cskipnode_next(prev_nodes->ptrs[lev], lev); // move cur_prev to next node
 
-      if (cur_prev->key > new_node->key){ // Insert new_node before cursor
-        csklnode_set_next(new_node, lev, cur_prev);
-        prev_nodes->old_nexts[lev] = cur_prev;
+        if (cur_prev->key > new_node->key){ // Insert new_node before cursor
+          csklnode_set_next(new_node, lev, cur_prev);
+          prev_nodes->old_nexts[lev] = cur_prev;
 
-      }else if(cur_prev->key == new_node->key){ // Insert new_node instead of cursor
-        csklitem_put(cskl, cur_prev, new_node->item, DEEP_COPY);
-        cskipnode_free(new_node);
-        return;
+        }else if(cur_prev->key == new_node->key){ // Insert new_node instead of cursor
+          csklitem_put(cskl, cur_prev, new_node->item, DEEP_COPY);
+          cskipnode_free(new_node);
+          return;
 
-      }else{ // cur_prev->key < new_node->key // Insert new_node after cursor
-        prev_nodes->ptrs[lev] = cur_prev;
-      }
+        }else{ // cur_prev->key < new_node->key // Insert new_node after cursor
+          prev_nodes->ptrs[lev] = cskipnode_next(prev_nodes->ptrs[lev], lev);
+        }
+      }while(prev_nodes->ptrs[lev]->nexts[lev] != prev_nodes->old_nexts[lev]);
+
     }
 
   }
@@ -289,20 +293,6 @@ cskiplist_put_specific
   }else{
     //Insert new node
     if (tower_height <= 0) tower_height = rand() % (cskl->max_height - 1)  + 1 ;
-
-#if DEBUG
-    char prev_nodes_str[100], key_str[50], next_nodes_str[100];
-    prev_nodes_str[0] = '\0'; next_nodes_str[0] = '\0';
-    for (int i = 0; i < cskl->max_height; ++i) {
-      sprintf(key_str, "%d, ", prev_nodes->ptrs[i]->key);
-      strcat(prev_nodes_str, key_str);
-      sprintf(key_str, "%d, ", prev_nodes->old_nexts[i]->key);
-      strcat(next_nodes_str, key_str);
-    }
-
-    printf("KEY: %d | height = %d :\n  prevs =  %s \n  nexts = %s \n\n", \
-           key, tower_height, prev_nodes_str, next_nodes_str);
-#endif
 
     cskiplist_buld_tower(cskl, new_node, tower_height, prev_nodes);
     atomic_add(&cskl->total_length, 1);
@@ -390,13 +380,11 @@ cskiplist_get
 )
 {
   csklnode_t *prev_node = cskip_find_prev_nodes(cskl, key)->ptrs[0];
-  node_item_t *item = atomic_load(&prev_node->item);
 
-  if (prev_node->key == key && item != NULL) {
-    return item->ptr;
-  }else{
-    return NULL;
+  if (prev_node->key == key) {
+    return atomic_load(&prev_node->item);
   }
+  return NULL;
 }
 
 
@@ -409,7 +397,7 @@ cskiplist_delete_node
 {
 
   csklnode_t *prev_node = cskip_find_prev_nodes(cskl, key)->ptrs[0];
-  node_item_t *item;
+  void *item;
 
   if (prev_node->key == key) {
     do{
