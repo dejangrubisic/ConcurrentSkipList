@@ -108,11 +108,21 @@ test_insert
   cskiplist_t *cskl
 )
 {
+
+#pragma omp single
+  printf("Insert Keys: ");
+
+
 #pragma omp for
   for (int i = 10; i >= 0; i--) {
-//  for (int i = 0;  i < 10; i++) {
+
+  printf("%d, ", i);
+
     cskiplist_put(cskl, i, interval_new(i, i + 10));
   }
+
+#pragma omp single
+  printf("\n");
 }
 
 
@@ -127,11 +137,14 @@ test_delete
   int rand_key[] = {3, 15, 2, 3, 7,
                     7,  7, 7, 7, 0};
 
+#pragma omp single
+{
   printf("Delete Keys: ");
   for (int i = 0; i < 10; ++i) {
     printf("%d, ", rand_key[i]);
   }
   printf("\n");
+}
 
 #pragma omp for
   for (int i = 0; i < 10; i++) {
@@ -182,15 +195,10 @@ int argc,
 char **argv
 )
 {
-  cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, &malloc, &interval_copy, NULL);
-
-//#pragma omp parallel
-//  {
-//    test_insert(cskl);
-//  }
+  cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, &malloc, &interval_copy, interval_compare);
 
   run_test(cskl, test_insert, "test_insert");
-//  run_test(cskl, test_delete, "test_delete");
+  run_test(cskl, test_delete, "test_delete");
 
   cskiplist_free(cskl);
 

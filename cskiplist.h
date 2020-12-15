@@ -29,9 +29,14 @@ typedef void* (*item_copy_fn)(void *item);
 typedef bool (*item_compare_fn)(void *item1, void *item2);
 
 
+//typedef struct {
+//  unsigned long deleted : 1;  // delete flag
+//  unsigned long ptr : 63;     // void *
+//}node_item_t;
+
 typedef struct {
-  unsigned long deleted : 1;  // delete flag
-  unsigned long ptr : 63;     // void *
+  bool deleted;  // delete flag
+  void *ptr;     // void *
 }node_item_t;
 
 
@@ -48,8 +53,8 @@ typedef struct csklnode_t {
 typedef struct cskiplist_t{
   csklnode_t *head_ptr;
   int max_height;
-  int length;
-  int total_length;
+  _Atomic(int) length;
+  _Atomic(int) total_length;
   mem_alloc_fn m_alloc;
   item_copy_fn i_copy;
   item_compare_fn i_cmp;
