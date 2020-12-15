@@ -109,7 +109,8 @@ test_insert
 )
 {
 #pragma omp for
-  for (int i = 0; i < 10; i++) {
+  for (int i = 10; i >= 0; i--) {
+//  for (int i = 0;  i < 10; i++) {
     cskiplist_put(cskl, i, interval_new(i, i + 10));
   }
 }
@@ -189,7 +190,7 @@ char **argv
 //  }
 
   run_test(cskl, test_insert, "test_insert");
-  run_test(cskl, test_delete, "test_delete");
+//  run_test(cskl, test_delete, "test_delete");
 
   cskiplist_free(cskl);
 

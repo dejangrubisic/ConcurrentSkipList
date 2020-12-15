@@ -1,22 +1,5 @@
 CC=gcc
-#CFLAGS=-g -fopenmp #-c -Wall
-#LDFLAGS=
-#SOURCES=test.c cskiplist.c
-#OBJECTS=$(SOURCES:.cpp=.o)
-#EXECUTABLE=test_csl
-#
-#all: $(SOURCES) $(EXECUTABLE)
-#
-#$(EXECUTABLE): $(OBJECTS)
-#	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
-#
-#.cpp.o:
-#	$(CC) $(CFLAGS) $< -o $@
-
-#clean:
-#	/bin/rm -rf cskiplist
-
-
+CFLAGS= -Wint-conversion -Wall
 EXEC=test
 SOURCES=test.c cskiplist.c
 OBJ =  $(EXEC) $(EXEC)-debug #$(EXEC)-serial
@@ -32,16 +15,18 @@ all: $(SOURCES) $(OBJ)
 
 # build the debug parallel version of the program
 $(EXEC)-debug: $(EXEC).c
-	$(CC) $(DEBUG) $(OMP) -o $(EXEC)-debug $(SOURCES) -lrt
+	$(CC) $(CFLAGS) $(DEBUG) $(OMP) -o $(EXEC)-debug $(SOURCES) -lrt
+	cp $@ bin/
 
 # build the serial version of the program
 $(EXEC)-serial: $(EXEC).c
-	$(CC) $(OPT) -o $(EXEC)-serial $(SOURCES) -lrt
-
+	$(CC) $(CFLAGS) $(OPT) -o $(EXEC)-serial $(SOURCES) -lrt
+	cp $@ bin/
 # build the optimized parallel version of the program
 $(EXEC): $(EXEC).c
-	$(CC) $(OPT) $(OMP) -o $(EXEC) $(SOURCES) -lrt
+	$(CC) $(CFLAGS) $(OPT) $(OMP) -o $(EXEC) $(SOURCES) -lrt
 	set env $OMP_PROC_BIND=true
+	cp $@ bin/
 
 #run the optimized program in parallel
 runp: $(EXEC)

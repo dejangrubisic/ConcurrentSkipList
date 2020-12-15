@@ -16,7 +16,7 @@
 
 
 // number of bytes in a skip list node with L levels
-#define SIZEOF_CSKLNODE_T(L) (sizeof(csklnode_t) + sizeof(void*) * L)
+#define SIZEOF_CSKLNODE_T(L) (sizeof(csklnode_t) + sizeof(unsigned long) * L)
 #define mcs_nil (struct mcs_node_s*) 0
 #define MAX_LEVEL 10
 
@@ -29,13 +29,36 @@
 #define KCYN  "\x1B[36m"
 #define KWHT  "\x1B[37m"
 
+
+#define ITEM_ULONG(item) (unsigned long)(atomic_load(&item))
+#define IS_DEL_A(item) ( (unsigned long)atomic_load(&item) & 1)
+#define ITEM_ADDR_A(item)  (void *) ( (unsigned long) atomic_load(&item) & 0xfffffffe)
+#define IS_DEL(item) ( (bool) item & 1)
+#define ITEM_ADDR(item)  (void *) ( item & 0xfffe)
+
+#define CAS(obj, exp, des) \
+      atomic_compare_exchange_strong(obj, exp, des)
 //******************************************************************************
 // implementation types
 //******************************************************************************
 
-static struct {
-  csklnode_t *nodes[MAX_LEVEL];
-}csklnodes_t;
+typedef struct{
+  csklnode_t **ptrs; // pointer for each level of previous node
+  csklnode_t **old_nexts; // each level nexts
+}cskl_prev_nodes_t;
+
+static cskl_prev_nodes_t *
+new_prev_nodes
+(
+  mem_alloc_fn m_alloc,
+  int max_height
+)
+{
+  cskl_prev_nodes_t *prev_nodes = (cskl_prev_nodes_t *)m_alloc(sizeof(cskl_prev_nodes_t));
+  prev_nodes->ptrs = (csklnode_t **) m_alloc(sizeof(csklnode_t *) * max_height);
+  prev_nodes->old_nexts = (csklnode_t **) m_alloc(sizeof(csklnode_t *) * max_height);
+  return prev_nodes;
+}
 
 //******************************************************************************
 // private operations
@@ -57,13 +80,15 @@ csklnode_create
 {
   csklnode_t* node = (csklnode_t*)m_alloc(SIZEOF_CSKLNODE_T(max_height));
   node->key = key;
-  node->item = item_deep_copy && item ? item_deep_copy(item) : item; // check if both deep_copy and items are defined
+
+  if (item_deep_copy && item){
+    atomic_store(&node->item, item_deep_copy(item));
+  }else{
+    atomic_store(&node->item, item);
+  }
   node->height = 0;
-  atomic_store(&node->version, 0);
-  node->deleted = false;
-  mcs_init(&(node->lock));
   for (int i = 0; i < max_height; ++i) {
-    node->nexts[i] = NULL;
+    atomic_store(&node->nexts[i], NULL);
   }
   return node;
 }
@@ -76,10 +101,11 @@ csklnode_set_next
   csklnode_t* next
 )
 {
-  if (node->nexts[lev] == NULL){
+  if (atomic_load(&node->nexts[lev]) == NULL){
     node->height++;
   }
-  node->nexts[lev] = next;
+  atomic_store(&node->nexts[lev], next);
+
 }
 
 
@@ -102,7 +128,7 @@ cskipnode_next_alive
 )
 {
   node = node->nexts[lev];
-  while (node->deleted) node = node->nexts[lev];
+  while (IS_DEL_A(node->item)) node = node->nexts[lev];
   return node;
 }
 
@@ -114,10 +140,13 @@ csklnode_compare
   item_compare_fn i_cmp
 )
 {
+  void *item1 = ITEM_ADDR_A(node1->item);
+  void *item2 = ITEM_ADDR_A(node2->item);
+
   if (node1->key == node2->key &&
-      node1->deleted == node2->deleted &&
-      node1->item && node2->item && // check just in case that items are not NULL
-      i_cmp(node1->item, node2->item)){
+      IS_DEL_A(node1->item) == IS_DEL_A(node2->item) &&
+      item1 && item2 && // check just in case that items are not NULL
+      i_cmp(item1, item2)){
     return true;
   }
   return false;
@@ -137,14 +166,14 @@ csklnode_t *node
 /*
  * Returns previous nodes per level. Note: if find your key it will be on level[0]
  */
-static csklnode_t **
+static cskl_prev_nodes_t *
 cskip_find_prev_nodes
 (
   cskiplist_t* cskl,
   int key
 )
 {
-  csklnode_t **prev_nodes = cskl->m_alloc(sizeof(csklnode_t *) * cskl->max_height);
+  cskl_prev_nodes_t *prev_nodes = new_prev_nodes( cskl->m_alloc, cskl->max_height);
 
   csklnode_t *prev_node = cskl->head_ptr;
   csklnode_t *cur_node;
@@ -158,7 +187,8 @@ cskip_find_prev_nodes
       prev_node = cskipnode_next(prev_node, lev);
       cur_node = cskipnode_next(cur_node, lev);
     }
-    prev_nodes[lev] = prev_node;
+    prev_nodes->ptrs[lev] = prev_node;
+    prev_nodes->old_nexts[lev] = atomic_load(&prev_node->nexts[lev]);
 
   }
   return prev_nodes;
@@ -170,20 +200,19 @@ cskiplist_buld_tower
 (
   csklnode_t *new_node,
   int tower_height,
-  csklnode_t **prev_nodes
+  cskl_prev_nodes_t *prev_nodes
 )
 {
-
-  csklnode_t *cur_node = cskipnode_next(prev_nodes[0], 0);
+  csklnode_t *cur_node;
 
   for (int lev = 0; lev < tower_height; ++lev) {
 
-    if (lev < cur_node->height){
-      csklnode_set_next(new_node, lev, cur_node);
-      csklnode_set_next(prev_nodes[lev], lev, new_node);
-    }else{
-      cur_node = cskipnode_next(cur_node, lev);
-    }
+    cur_node = cskipnode_next(prev_nodes->ptrs[lev], lev);
+    csklnode_set_next(new_node, lev, cur_node);
+
+//    if (CAS(prev_nodes->ptrs[lev]->nexts[lev]))
+    csklnode_set_next(prev_nodes->ptrs[lev], lev, new_node);
+
   }
 }
 
@@ -205,6 +234,7 @@ cskip_insert_dumy_nodes
 }
 
 
+//atomic_compare_exchange_strong
 static void
 cskiplist_put_specific
 (
@@ -218,28 +248,35 @@ cskiplist_put_specific
   // allocate my node
   csklnode_t *new_node = csklnode_create(key, item, cskl->max_height, cskl->m_alloc, item_deep_copy);
 
-  csklnode_t **prev_nodes = cskip_find_prev_nodes(cskl, key);
-  csklnode_t *next_node = prev_nodes[0]->nexts[0];
+  cskl_prev_nodes_t *prev_nodes = cskip_find_prev_nodes(cskl, key);
 
-  if (prev_nodes[0]->deleted || prev_nodes[0]->key == key){
-    //Reuse prev_node if deleted
-    prev_nodes[0]->item = item;
-    prev_nodes[0]->deleted = false;
-  }else if (next_node->deleted){
-    //Reuse next_node if deleted
-    next_node->item = item;
-    next_node->deleted = false;
+  //Reuse prev_node if deleted
+  csklnode_t *prev_node = prev_nodes->ptrs[0];
+  if (prev_node->key == key){
+    atomic_store(&prev_node->item, item);
   }else{
     //Insert new node
     if (tower_height <= 0) tower_height = rand() % (cskl->max_height - 1)  + 1 ;
     printf("KEY: %d | height = %d\n", key, tower_height);
     cskiplist_buld_tower(new_node, tower_height, prev_nodes);
     cskl->total_length++;
-
   }
-  cskl->length++;
 
-  free(prev_nodes);
+  // Reuse next_node if deleted
+  // TODO: this can be dangerous if somebody with higher key inserts
+  // TODO: while all your prev_nodes points to that
+//  csklnode_t *next_node = prev_node->nexts[0];
+//  if (next_node->item.deleted){
+//    if (CAS(&next_node->item, &next_node->item, new_item )){
+//      next_node->key = key;
+//      next_node->version++;
+//      goto lret;
+//    }
+//  }
+
+  cskl->length++;
+  free(prev_nodes->ptrs);
+  free(prev_nodes->old_nexts);
 }
 
 //******************************************************************************
@@ -264,7 +301,6 @@ cskiplist_create
   cskl->i_copy = i_copy;
   cskl->i_cmp = i_cmp;
   cskl->max_height = max_height;
-  mcs_init(&cskl->lock);
 
   cskip_insert_dumy_nodes(cskl);
 
@@ -282,14 +318,12 @@ cskiplist_free
   csklnode_t *node_next = cskl->head_ptr;
 
   //TODO: Lock this
-//  mcs_lock(&cskl->lock);
   while (node->nexts[0] != NULL){ // only on last node
     node_next = node->nexts[0];
     cskipnode_free(node);
     node = node_next;
   }
 //  cskipnode_free(node);
-//  mcs_unlock(&cskl->lock);
 }
 
 
@@ -311,7 +345,6 @@ cskiplist_put
 }
 
 
-// CAS, no ABA problem as no deletion
 void *
 cskiplist_get
 (
@@ -319,9 +352,11 @@ cskiplist_get
   int key
 )
 {
-  csklnode_t *prev_node = cskip_find_prev_nodes(cskl, key)[0];
-  if (prev_node->key == key && !prev_node->deleted) {
-    return prev_node->item;
+  csklnode_t *prev_node = cskip_find_prev_nodes(cskl, key)->ptrs[0];
+  unsigned long item_ulong = ITEM_ULONG(prev_node->item);
+
+  if (prev_node->key == key && !IS_DEL(item_ulong)) {
+    return ITEM_ADDR(item_ulong);
   }else{
     return NULL;
   }
@@ -335,9 +370,12 @@ cskiplist_delete_node
   int key
 )
 {
-  csklnode_t *prev_node = cskip_find_prev_nodes(cskl, key)[0];
-  if (prev_node->key == key && !prev_node->deleted) {
-    prev_node->deleted = true;
+
+  csklnode_t *prev_node = cskip_find_prev_nodes(cskl, key)->ptrs[0];
+
+
+  if (prev_node->key == key && !IS_DEL_A(prev_node->item)) {
+    atomic_store(&prev_node->item, ITEM_ADDR_A(prev_node->item));
     cskl->length--;
   }
 }
@@ -354,8 +392,8 @@ cskiplist_copy
 {
   cskiplist_t* new_cskl = cskiplist_create(cskl->max_height, cskl->m_alloc, cskl->i_copy, cskl->i_cmp);
 
-  for (csklnode_t *cur_node=cskl->head_ptr->nexts[0]; cur_node->nexts[0] != NULL; cur_node = cur_node->nexts[0]) {
-    cskiplist_put_specific(new_cskl, cur_node->key, cur_node->item, cur_node->height, NULL);
+  for (csklnode_t *cur_node=cskl->head_ptr->nexts[0]; cur_node->nexts[0] != NULL; cur_node = atomic_load(&cur_node->nexts[0])) {
+    cskiplist_put_specific(new_cskl, cur_node->key, ITEM_ADDR_A(cur_node->item), cur_node->height, NULL);
   }
   return new_cskl;
 }
@@ -370,8 +408,8 @@ cskiplist_t* cskl
   cskiplist_t* new_cskl = cskiplist_create(cskl->max_height, cskl->m_alloc, cskl->i_copy, cskl->i_cmp);
 
   // Dummy nodes are already there, so start inserting from node 1
-  for (csklnode_t *cur_node=cskl->head_ptr->nexts[0]; cur_node->nexts[0] != NULL; cur_node = cur_node->nexts[0]) {
-    cskiplist_put_specific(new_cskl, cur_node->key, cur_node->item, cur_node->height, cskl->i_copy);
+  for (csklnode_t *cur_node=cskl->head_ptr->nexts[0]; cur_node->nexts[0] != NULL; cur_node = atomic_load(&cur_node->nexts[0])) {
+    cskiplist_put_specific(new_cskl, cur_node->key, ITEM_ADDR_A(cur_node->item), cur_node->height, cskl->i_copy);
   }
   return new_cskl;
 }
@@ -436,7 +474,7 @@ cskiplist_print(cskiplist_t* cskl)
 
     keys[id] = cur_node->key;
 
-    if (cur_node->deleted){
+    if (IS_DEL_A(cur_node->item)){
       str_deleted[id] = 'd';
     }else{
       str_deleted[id] = '_';

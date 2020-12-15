@@ -29,17 +29,20 @@ typedef void* (*item_copy_fn)(void *item);
 typedef bool (*item_compare_fn)(void *item1, void *item2);
 
 
+typedef struct {
+  unsigned long deleted : 1;  // delete flag
+  unsigned long ptr : 63;     // void *
+}node_item_t;
+
+
 typedef struct csklnode_t {
   int key;
-  void *item;
+  _Atomic(void *) item; // the lowest bit will be delete bit 0 - alive, 1 - deleted
   int height;
-  volatile bool deleted;
-  atomic_uint version;
-  mcs_lock_t lock;
   // memory allocated for a node will include space for its vector of  pointers
-  struct csklnode_t *nexts[];
-} csklnode_t;
+  _Atomic(struct csklnode_t *) nexts[];
 
+} csklnode_t;
 
 
 typedef struct cskiplist_t{
