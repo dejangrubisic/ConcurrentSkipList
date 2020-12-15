@@ -116,7 +116,7 @@ cskipnode_next
   int lev
 )
 {
-  return node->nexts[lev];
+  return atomic_load(&node->nexts[lev]);
 }
 
 
@@ -146,7 +146,7 @@ csklnode_compare
   if (node1->key == node2->key &&
       IS_DEL_A(node1->item) == IS_DEL_A(node2->item) &&
       item1 && item2 && // check just in case that items are not NULL
-      i_cmp(item1, item2)){
+      i_cmp ? i_cmp(item1, item2) : item1 == item2 ){
     return true;
   }
   return false;
@@ -156,10 +156,10 @@ csklnode_compare
 static void
 cskipnode_free
 (
-csklnode_t *node
+  csklnode_t *node
 )
 {
-  free(node->item);
+//  free(node->nexts);
 }
 
 
@@ -185,35 +185,13 @@ cskip_find_prev_nodes
     // if cur_node->key is bigger than key, prev_node is what we want to return
     while (cur_node->key <= key){
       prev_node = cskipnode_next(prev_node, lev);
-      cur_node = cskipnode_next(cur_node, lev);
+      cur_node = cskipnode_next(prev_node, lev);
     }
     prev_nodes->ptrs[lev] = prev_node;
     prev_nodes->old_nexts[lev] = atomic_load(&prev_node->nexts[lev]);
 
   }
   return prev_nodes;
-}
-
-
-static void
-cskiplist_buld_tower
-(
-  csklnode_t *new_node,
-  int tower_height,
-  cskl_prev_nodes_t *prev_nodes
-)
-{
-  csklnode_t *cur_node;
-
-  for (int lev = 0; lev < tower_height; ++lev) {
-
-    cur_node = cskipnode_next(prev_nodes->ptrs[lev], lev);
-    csklnode_set_next(new_node, lev, cur_node);
-
-//    if (CAS(prev_nodes->ptrs[lev]->nexts[lev]))
-    csklnode_set_next(prev_nodes->ptrs[lev], lev, new_node);
-
-  }
 }
 
 
@@ -231,6 +209,43 @@ cskip_insert_dumy_nodes
     csklnode_set_next(tail, i, NULL);
   }
   cskl->head_ptr = head;
+}
+
+
+static void
+cskiplist_buld_tower
+(
+csklnode_t *new_node,
+int tower_height,
+cskl_prev_nodes_t *prev_nodes
+)
+{
+  csklnode_t *cur_prev;
+
+  for (int lev = 0; lev < tower_height; ++lev) {
+
+    csklnode_set_next(new_node, lev, cskipnode_next(prev_nodes->ptrs[lev], lev));
+
+    while (!CAS(&prev_nodes->ptrs[lev]->nexts[lev],
+                &prev_nodes->old_nexts[lev], new_node)){
+
+      cur_prev = cskipnode_next(prev_nodes->ptrs[lev], lev); // move cur_prev to next node
+
+      if (cur_prev->key > new_node->key){ // Insert new_node before cursor
+        csklnode_set_next(new_node, lev, cur_prev);
+        prev_nodes->old_nexts[lev] = cur_prev;
+
+      }else if(cur_prev->key == new_node->key){ // Insert new_node instead of cursor
+        atomic_store(&cur_prev->item, new_node->item);
+        return;
+
+      }else{ // cur_prev->key < new_node->key // Insert new_node after cursor
+        prev_nodes->ptrs[lev] = cur_prev;
+//        prev_nodes->old_nexts[lev] = cskipnode_next(prev_nodes->ptrs[lev], lev);
+      }
+    }
+
+  }
 }
 
 
@@ -257,7 +272,18 @@ cskiplist_put_specific
   }else{
     //Insert new node
     if (tower_height <= 0) tower_height = rand() % (cskl->max_height - 1)  + 1 ;
-    printf("KEY: %d | height = %d\n", key, tower_height);
+
+    char prev_nodes_str[100], key_str[50], next_nodes_str[100];
+    prev_nodes_str[0] = '\0'; next_nodes_str[0] = '\0';
+    for (int i = 0; i < cskl->max_height; ++i) {
+      sprintf(key_str, "%d, ", prev_nodes->ptrs[i]->key);
+      strcat(prev_nodes_str, key_str);
+      sprintf(key_str, "%d, ", prev_nodes->old_nexts[i]->key);
+      strcat(next_nodes_str, key_str);
+    }
+
+    printf("KEY: %d | height = %d :\n  prevs =  %s \n  nexts = %s \n\n", \
+           key, tower_height, prev_nodes_str, next_nodes_str);
     cskiplist_buld_tower(new_node, tower_height, prev_nodes);
     cskl->total_length++;
   }
@@ -278,6 +304,8 @@ cskiplist_put_specific
   free(prev_nodes->ptrs);
   free(prev_nodes->old_nexts);
 }
+
+
 
 //******************************************************************************
 // interface operations
@@ -317,7 +345,7 @@ cskiplist_free
   csklnode_t *node = cskl->head_ptr;
   csklnode_t *node_next = cskl->head_ptr;
 
-  //TODO: Lock this
+
   while (node->nexts[0] != NULL){ // only on last node
     node_next = node->nexts[0];
     cskipnode_free(node);
@@ -434,8 +462,8 @@ cskiplist_compare
     if (csklnode_compare(node1, node2, cskl1->i_cmp) == false){
       return false;
     }
-    node1 = node1->nexts[0];
-    node2 = node2->nexts[0];
+    node1 = cskipnode_next_alive(node1, 0);
+    node2 = cskipnode_next_alive(node2, 0);
 
   }
   return true;

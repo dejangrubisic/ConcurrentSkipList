@@ -182,7 +182,7 @@ int argc,
 char **argv
 )
 {
-  cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, &malloc, &interval_copy, &interval_compare);
+  cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, &malloc, &interval_copy, NULL);
 
 //#pragma omp parallel
 //  {
