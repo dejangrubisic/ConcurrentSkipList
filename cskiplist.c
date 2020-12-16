@@ -293,16 +293,13 @@ cskiplist_buld_tower
 
     csklnode_set_next(new_node, lev, cskipnode_next(prev_nodes->ptrs[lev], lev));
 
-    while (!CAS(&prev_nodes->ptrs[lev]->nexts[lev],
-                &prev_nodes->old_nexts[lev], new_node)){
-
-      // New node is not positioned well
+    do{
+      // Position your new node on the right place and when you are sure try CAS
       do {
         cur_prev = cskipnode_next(prev_nodes->ptrs[lev], lev); // move cur_prev to next node
 
         if (cur_prev->key > new_node->key){ // Insert new_node before cursor
           csklnode_set_next(new_node, lev, cur_prev);
-          prev_nodes->old_nexts[lev] = cur_prev;
 
         }else if(cur_prev->key == new_node->key){ // Insert new_node instead of cursor
           cskipnode_update_key(cskl, cur_prev, new_node->item);
@@ -313,9 +310,10 @@ cskiplist_buld_tower
           prev_nodes->ptrs[lev] = cskipnode_next(prev_nodes->ptrs[lev], lev);
         }
         // Check the same condition as in CAS
-      }while(prev_nodes->ptrs[lev]->nexts[lev] != prev_nodes->old_nexts[lev]);
+      }while(prev_nodes->ptrs[lev]->nexts[lev] != cur_prev);
 
-    }
+    }while (!CAS(&prev_nodes->ptrs[lev]->nexts[lev],
+                 &cur_prev, new_node));
 
   }
   return true;
