@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
-
+#include <assert.h>
 #include "cskiplist.h"
 
 
@@ -65,6 +65,17 @@ new_prev_nodes
 // private operations
 //******************************************************************************
 
+static bool
+csklitem_cmp_default
+(
+void *item1,
+void *item2
+)
+{
+  return item1 == item2;
+}
+
+
 static void
 csklitem_put
 (
@@ -74,7 +85,7 @@ csklitem_put
   bool copy_deep_flag
 )
 {
-  void *node_item = copy_deep_flag && item ? cskl->i_copy(item):(item);
+  void *node_item = copy_deep_flag && item? cskl->i_copy(item) : item;
   atomic_store(&node->item, node_item);
 }
 
@@ -137,9 +148,13 @@ cskipnode_next_alive
   int lev
 )
 {
+  if (node == NULL)
+    return NULL;
+
   node = atomic_load(&node->nexts[lev]);
-  while (atomic_load(&node->item) != NULL)
+  while (node != NULL && atomic_load(&node->item) != NULL){
     node = atomic_load(&node->nexts[lev]);
+  }
   return node;
 }
 
@@ -151,6 +166,9 @@ csklnode_compare
   item_compare_fn i_cmp
 )
 {
+  if (node1 != node2 && (node1 == NULL || node2 == NULL))
+  return false;
+
   if (node1->key == node2->key) {
     void *item1 = atomic_load(&node1->item);
     void *item2 = atomic_load(&node2->item);
@@ -160,9 +178,7 @@ csklnode_compare
 
     if (i_cmp != NULL)
       return i_cmp(item1, item2);
-
   }
-
 
   return false;
 }
@@ -175,7 +191,7 @@ cskipnode_free
 )
 {
   free(node);
-  free(node->item);
+//  free(node->item);
 }
 
 
@@ -228,7 +244,34 @@ cskip_insert_dumy_nodes
 }
 
 
+/*
+ * Insert the item in the node and increment lenght if needed
+ */
 static void
+cskipnode_update_key
+(
+cskiplist_t* cskl,
+csklnode_t *node,
+void *item
+)
+{
+  void *old_item;
+  do{
+    old_item = atomic_load(&node->item);
+  }while (!CAS(&node->item, &old_item, item));
+
+  if (old_item == NULL){ // Increment length only if make it alive
+    atomic_add(&cskl->length, 1);
+  }
+}
+
+
+/*
+ * Builds a tower and inserts node to list.
+ * returns false if it just update its key,
+ * and true if it really builds a tower
+ */
+static bool
 cskiplist_buld_tower
 (
   cskiplist_t* cskl,
@@ -255,22 +298,23 @@ cskiplist_buld_tower
           prev_nodes->old_nexts[lev] = cur_prev;
 
         }else if(cur_prev->key == new_node->key){ // Insert new_node instead of cursor
-          csklitem_put(cskl, cur_prev, new_node->item, DEEP_COPY);
+          cskipnode_update_key(cskl, cur_prev, new_node->item);
           cskipnode_free(new_node);
-          return;
+          return false;
 
         }else{ // cur_prev->key < new_node->key // Insert new_node after cursor
           prev_nodes->ptrs[lev] = cskipnode_next(prev_nodes->ptrs[lev], lev);
         }
+        // Check the same condition as in CAS
       }while(prev_nodes->ptrs[lev]->nexts[lev] != prev_nodes->old_nexts[lev]);
 
     }
 
   }
+  return true;
 }
 
 
-//atomic_compare_exchange_strong
 static void
 cskiplist_put_specific
 (
@@ -289,17 +333,21 @@ cskiplist_put_specific
   //Reuse prev_node if has your key
   csklnode_t *prev_node = prev_nodes->ptrs[0];
   if (prev_node->key == key){
-    atomic_store(&prev_node->item, item);
+    cskipnode_update_key(cskl, prev_node, item);
+    cskipnode_free(new_node);
   }else{
     //Insert new node
-    if (tower_height <= 0) tower_height = rand() % (cskl->max_height - 1)  + 1 ;
+    if (tower_height <= 0)
+      tower_height = rand() % (cskl->max_height - 1)  + 1 ;
 
-    cskiplist_buld_tower(cskl, new_node, tower_height, prev_nodes);
-    atomic_add(&cskl->total_length, 1);
+    bool is_tower_new = cskiplist_buld_tower(cskl, new_node, tower_height, prev_nodes);
+    if (is_tower_new){
+      atomic_add(&cskl->total_length, 1);
+      atomic_add(&cskl->length, 1);
+    }
   }
 
 
-  atomic_add(&cskl->length, 1);
   free(prev_nodes->ptrs);
   free(prev_nodes->old_nexts);
 }
@@ -309,7 +357,6 @@ cskiplist_put_specific
 //******************************************************************************
 // interface operations
 //******************************************************************************
-
 
 cskiplist_t *
 cskiplist_create
@@ -326,7 +373,7 @@ cskiplist_create
   atomic_store(&cskl->total_length, 2);
   cskl->m_alloc = m_alloc;
   cskl->i_copy = i_copy;
-  cskl->i_cmp = i_cmp;
+  cskl->i_cmp = i_cmp ? i_cmp : csklitem_cmp_default;
   cskl->max_height = max_height;
 
   cskip_insert_dumy_nodes(cskl);
@@ -368,7 +415,12 @@ cskiplist_put
   void *item
 )
 {
-  cskiplist_put_specific(cskl, key, item, 0, SHELL_COPY);
+  if (item){
+    cskiplist_put_specific(cskl, key, item, 0, SHELL_COPY);
+  } else{
+    cskiplist_delete_node(cskl, key);
+  }
+
 }
 
 
@@ -404,8 +456,10 @@ cskiplist_delete_node
       item = atomic_load(&prev_node->item);
     }while(!CAS(&prev_node->item, &item, NULL));
 
+    if(item)
+      atomic_add(&cskl->length, -1);
+
     free(item);
-    atomic_add(&cskl->length, -1);
   }
 }
 
@@ -434,11 +488,17 @@ cskiplist_copy_deep
 cskiplist_t* cskl
 )
 {
+  // You must have i_copy defined to use this function
+  assert(cskl->i_copy != NULL);
+
   cskiplist_t* new_cskl = cskiplist_create(cskl->max_height, cskl->m_alloc, cskl->i_copy, cskl->i_cmp);
 
   // Dummy nodes are already there, so start inserting from node 1
   for (csklnode_t *cur_node=cskl->head_ptr->nexts[0]; cur_node->nexts[0] != NULL; cur_node = atomic_load(&cur_node->nexts[0])) {
-    cskiplist_put_specific(new_cskl, cur_node->key, atomic_load(&cur_node->item), cur_node->height, DEEP_COPY);
+    if (atomic_load(&cur_node->item)){
+      cskiplist_put_specific(new_cskl, cur_node->key, atomic_load(&cur_node->item), cur_node->height, DEEP_COPY);
+    }
+
   }
   return new_cskl;
 }
@@ -452,14 +512,16 @@ cskiplist_compare
 )
 {
   if (atomic_load(&cskl1->length) != atomic_load(&cskl2->length)){
+    printf("Length1 = %d, Length2 = %d\n",
+           atomic_load(&cskl1->length), atomic_load(&cskl2->length));
     return false;
   }
 
   // Start comparing from first valid node
-  csklnode_t *node1=cskl1->head_ptr->nexts[0];
-  csklnode_t *node2=cskl2->head_ptr->nexts[0];
+  csklnode_t *node1=cskipnode_next_alive(cskl1->head_ptr, 0);
+  csklnode_t *node2=cskipnode_next_alive(cskl2->head_ptr, 0);
 
-  while (node1->nexts[0] != NULL || node2->nexts[0] != NULL) {
+  while (node1 != NULL || node2 != NULL) {
     if (csklnode_compare(node1, node2, cskl1->i_cmp) == false){
       return false;
     }

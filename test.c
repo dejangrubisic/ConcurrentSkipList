@@ -11,8 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <omp.h>
-
-
+#include <assert.h>
+#include <math.h>
 
 //******************************************************************************
 // local include files
@@ -48,12 +48,45 @@ typedef struct {
   long end;
 } interval_t;
 
-typedef void (*test_fn)(cskiplist_t *cskl);
+typedef void (*test_fn)(cskiplist_t *cskl, int *rand_keys, int num_range );
 
 //******************************************************************************
 // private operations
 //******************************************************************************
 
+static void
+exchange_int
+(
+  int *a,
+  int *b
+)
+{
+  int tmp = *a;
+  *a = *b;
+  *b = tmp;
+}
+
+
+static int *
+create_random_keys
+(
+  int num_range
+)
+{
+  int *rand_keys = (int*) malloc(sizeof(int)*num_range);
+
+  for (int i = 0; i < num_range; ++i) {
+    rand_keys[i] = i;
+  }
+
+  int rand_id;
+  for (int i = 0; i < num_range; ++i) {
+    rand_id = rand() % num_range;
+    exchange_int(&rand_keys[i], &rand_keys[rand_id]);
+  }
+
+  return rand_keys;
+}
 
 static interval_t *
 interval_new
@@ -105,7 +138,9 @@ interval_compare
 void
 test_insert
 (
-  cskiplist_t *cskl
+  cskiplist_t *cskl,
+  int *rand_keys,
+  int num_range
 )
 {
 
@@ -130,7 +165,9 @@ test_insert
 void
 test_delete
 (
-  cskiplist_t *cskl
+  cskiplist_t *cskl,
+  int *rand_keys,
+  int num_range
 )
 {
   // keys are going from 1 to 10
@@ -158,26 +195,42 @@ test_delete
 void
 test_random
 (
-cskiplist_t *cskl
+  cskiplist_t *cskl,
+  int *rand_keys,
+  int num_range
 )
 {
-  // keys are going from 0 to num_range
-  int num_range = 10;
-
-  int my_id = omp_get_thread_num();
-
 #pragma omp single
-  printf("RANDOM TEST\n\n");
+  {
+    printf("RANDOM TEST\n\n");
+  }
 
-#pragma omp for
-  for (int i = 0; i < num_range; i++) {
-    int new_key = rand() % num_range;
-    if (rand() % 1){
-      printf("T%d: put [ key = %d]\n", my_id, new_key);
-      cskiplist_put(cskl, new_key, interval_new(new_key, new_key + 10));
+  // keys are going from 0 to num_range
+  int my_id = omp_get_thread_num();
+  int num_threads = omp_get_num_threads();
+  int block_size =  num_range / num_threads ;
+
+  assert(num_range % num_threads == 0);
+
+  bool *visited = (bool*)calloc(block_size, sizeof(bool));
+  int *my_head = rand_keys + my_id * block_size;
+
+//#pragma omp for
+  int i = 0;
+  while (i < block_size) {
+    int key = my_head[i];
+    int rand_offset = rand() % (block_size - i);
+
+    if (!visited[key]){
+      printf("T%d: put [ key = %d]\n", my_id, key);
+      cskiplist_put(cskl, key, interval_new(key, key + 10));
+
+      visited[key] = true;
+      exchange_int(&my_head[i], &my_head[i+rand_offset]);
     }else{
-      printf("T%d: delete [ key = %d]\n", my_id, new_key);
-      cskiplist_delete_node(cskl, new_key);
+      printf("T%d: delete [ key = %d]\n", my_id, key);
+      cskiplist_delete_node(cskl, key);
+      i++;
     }
   }
 
@@ -189,16 +242,20 @@ run_test
 (
   cskiplist_t *cskl,
   test_fn test,
-  char* test_name
+  char* test_name,
+  int num_range
 )
 {
   cskiplist_t *new_cskl = cskiplist_copy_deep(cskl);
+  int *rand_keys = create_random_keys(num_range);
 
+  printf("STARTING Length1 = %d, Length2 = %d\n",
+         atomic_load(&cskl->length), atomic_load(&new_cskl->length));
 #pragma omp parallel
   {
-    test(cskl);
+    test(cskl, rand_keys, num_range);
   }
-  test(new_cskl);
+  test(new_cskl, rand_keys, num_range);
 
   cskiplist_print(cskl);
   cskiplist_print(new_cskl);
@@ -210,6 +267,7 @@ run_test
   printf("__________________________________________________________\n\n");
 
   cskiplist_free(new_cskl);
+  free(rand_keys);
 }
 
 
@@ -225,12 +283,14 @@ int argc,
 char **argv
 )
 {
+  int num_range = 10;
+
   cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, &malloc, &interval_copy, interval_compare);
 
-  run_test(cskl, test_insert, "test_insert");
-  run_test(cskl, test_delete, "test_delete");
+  run_test(cskl, test_insert, "test_insert", num_range);
+  run_test(cskl, test_delete, "test_delete", num_range);
 
-  run_test(cskl, test_random, "test_random");
+  run_test(cskl, test_random, "test_random", num_range);
 
 
   cskiplist_free(cskl);
