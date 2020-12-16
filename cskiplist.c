@@ -8,6 +8,7 @@
 #include <string.h>
 #include <assert.h>
 #include "cskiplist.h"
+#include <omp.h>
 
 
 //******************************************************************************
@@ -16,10 +17,15 @@
 
 #define DEBUG 0
 
+#if DEBUG
+#define PRINT(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define PRINT(...)
+#endif
+
 // number of bytes in a skip list node with L levels
-#define SIZEOF_CSKLNODE_T(L) (sizeof(csklnode_t) + sizeof(unsigned long) * L)
+#define SIZEOF_CSKLNODE_T(L) (sizeof(csklnode_t) + sizeof(_Atomic(csklnode_t *)) * L)
 #define mcs_nil (struct mcs_node_s*) 0
-#define MAX_LEVEL 10
 
 #define SHELL_COPY 0
 #define DEEP_COPY 1
@@ -104,7 +110,7 @@ csklnode_create
   bool copy_deep_flag
 )
 {
-  csklnode_t* node = (csklnode_t*)cskl->m_alloc(SIZEOF_CSKLNODE_T(max_height));
+  csklnode_t* node = (csklnode_t*)cskl->m_alloc(sizeof(csklnode_t));
   node->key = key;
   csklitem_put(cskl, node, item, copy_deep_flag);
   node->height = 0;
@@ -190,7 +196,8 @@ cskipnode_free
   csklnode_t *node
 )
 {
-  free(node);
+  PRINT("T%d | Free: %p\n", omp_get_thread_num(),   node);
+//  free(node);
 //  free(node->item);
 }
 
@@ -347,7 +354,6 @@ cskiplist_put_specific
     }
   }
 
-
   free(prev_nodes->ptrs);
   free(prev_nodes->old_nexts);
 }
@@ -391,10 +397,9 @@ cskiplist_free
   csklnode_t *node = cskl->head_ptr;
   csklnode_t *node_next = cskl->head_ptr;
 
-
   while (node->nexts[0] != NULL){ // only on last node
     node_next = node->nexts[0];
-    cskipnode_free(node);
+//    cskipnode_free(node);
     node = node_next;
   }
 //  cskipnode_free(node);
@@ -459,7 +464,7 @@ cskiplist_delete_node
     if(item)
       atomic_add(&cskl->length, -1);
 
-    free(item);
+//    free(item);
   }
 }
 
@@ -512,7 +517,7 @@ cskiplist_compare
 )
 {
   if (atomic_load(&cskl1->length) != atomic_load(&cskl2->length)){
-    printf("Length1 = %d, Length2 = %d\n",
+    PRINT("Length1 = %d, Length2 = %d\n",
            atomic_load(&cskl1->length), atomic_load(&cskl2->length));
     return false;
   }

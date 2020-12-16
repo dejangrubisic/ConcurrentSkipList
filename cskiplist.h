@@ -19,6 +19,7 @@
 #include "mcs-lock.h"
 #include <stdatomic.h>
 
+#define MAX_LEVEL 10
 
 //******************************************************************************
 // implementation types
@@ -35,8 +36,7 @@ typedef struct csklnode_t {
   _Atomic(void *) item; // the lowest bit will be delete bit 0 - alive, 1 - deleted
   int height;
   // memory allocated for a node will include space for its vector of  pointers
-  _Atomic(struct csklnode_t *) nexts[];
-
+  _Atomic(struct csklnode_t *) nexts[MAX_LEVEL];
 } csklnode_t;
 
 

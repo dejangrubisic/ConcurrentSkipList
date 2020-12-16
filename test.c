@@ -14,17 +14,30 @@
 #include <assert.h>
 #include <math.h>
 
+
+
 //******************************************************************************
 // local include files
 //******************************************************************************
 
 #include "cskiplist.h"
+#include "timer.h"
 
 
 
 //******************************************************************************
 // macros
 //******************************************************************************
+
+#define DEBUG 0
+
+#if DEBUG
+#define PRINT(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define PRINT(...)
+#endif
+
+
 
 #define STRMAX     8096
 #define MAX_HEIGHT 4
@@ -145,19 +158,19 @@ test_insert
 {
 
 #pragma omp single
-  printf("Insert Keys: ");
+  PRINT("Insert Keys: ");
 
 
 #pragma omp for
-  for (int i = 10; i >= 0; i--) {
+  for (int i = 0; i < num_range; i++) {
 
-  printf("%d, ", i);
+  PRINT("%d, ", rand_keys[i]);
 
-    cskiplist_put(cskl, i, interval_new(i, i + 10));
+    cskiplist_put(cskl, rand_keys[i], interval_new(rand_keys[i], rand_keys[i] + 10));
   }
 
 #pragma omp single
-  printf("\n");
+  PRINT("\n");
 }
 
 
@@ -170,22 +183,19 @@ test_delete
   int num_range
 )
 {
-  // keys are going from 1 to 10
-  int rand_key[] = {3, 15, 2, 3, 7,
-                    7,  7, 7, 7, 0};
 
 #pragma omp single
 {
-  printf("Delete Keys: ");
-  for (int i = 0; i < 10; ++i) {
-    printf("%d, ", rand_key[i]);
+  PRINT("Delete Keys: ");
+  for (int i = 0; i < num_range; ++i) {
+    PRINT("%d, ", rand_keys[i]);
   }
-  printf("\n");
+  PRINT("\n");
 }
 
 #pragma omp for
-  for (int i = 0; i < 10; i++) {
-    cskiplist_delete_node(cskl, rand_key[i]);
+  for (int i = 0; i < num_range; i++) {
+    cskiplist_delete_node(cskl, rand_keys[i]);
   }
 
 }
@@ -202,7 +212,7 @@ test_random
 {
 #pragma omp single
   {
-    printf("RANDOM TEST\n\n");
+    PRINT("RANDOM TEST\n\n");
   }
 
   // keys are going from 0 to num_range
@@ -215,20 +225,19 @@ test_random
   bool *visited = (bool*)calloc(block_size, sizeof(bool));
   int *my_head = rand_keys + my_id * block_size;
 
-//#pragma omp for
   int i = 0;
   while (i < block_size) {
     int key = my_head[i];
     int rand_offset = rand() % (block_size - i);
 
     if (!visited[key]){
-      printf("T%d: put [ key = %d]\n", my_id, key);
+      PRINT("T%d: put [ key = %d]\n", my_id, key);
       cskiplist_put(cskl, key, interval_new(key, key + 10));
 
       visited[key] = true;
       exchange_int(&my_head[i], &my_head[i+rand_offset]);
     }else{
-      printf("T%d: delete [ key = %d]\n", my_id, key);
+      PRINT("T%d: delete [ key = %d]\n", my_id, key);
       cskiplist_delete_node(cskl, key);
       i++;
     }
@@ -248,17 +257,28 @@ run_test
 {
   cskiplist_t *new_cskl = cskiplist_copy_deep(cskl);
   int *rand_keys = create_random_keys(num_range);
-
-  printf("STARTING Length1 = %d, Length2 = %d\n",
+  int num_threads;
+  PRINT("STARTING Length1 = %d, Length2 = %d\n",
          atomic_load(&cskl->length), atomic_load(&new_cskl->length));
+
+
+  timer_start();
 #pragma omp parallel
   {
+    num_threads = omp_get_num_threads();
     test(cskl, rand_keys, num_range);
   }
-  test(new_cskl, rand_keys, num_range);
+  printf("%d thread(s) TIME = %f\n", num_threads, timer_elapsed());
 
+
+  timer_start();
+  test(new_cskl, rand_keys, num_range);
+  printf("Serial TIME = %f\n", timer_elapsed());
+
+#if DEBUG
   cskiplist_print(cskl);
   cskiplist_print(new_cskl);
+#endif
 
   if (cskiplist_compare(cskl, new_cskl))
     printf("%s: %sPASSED%s\n", test_name, KGRN, KNRM);
@@ -279,11 +299,11 @@ run_test
 int
 main
 (
-int argc,
-char **argv
+  int argc,
+  char **argv
 )
 {
-  int num_range = 10;
+  int num_range = 200;
 
   cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, &malloc, &interval_copy, interval_compare);
 
