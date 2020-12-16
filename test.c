@@ -24,7 +24,6 @@
 #include "timer.h"
 
 
-
 //******************************************************************************
 // macros
 //******************************************************************************
@@ -37,11 +36,8 @@
 #define PRINT(...)
 #endif
 
-
-
-#define STRMAX     8096
+#define ROUNDS 1000
 #define MAX_HEIGHT 4
-#define GET_NAME(var)  #var
 
 #define KNRM  "\x1B[0m"
 #define KRED  "\x1B[31m"
@@ -222,23 +218,25 @@ test_random
 
   assert(num_range % num_threads == 0);
 
-  bool *visited = (bool*)calloc(block_size, sizeof(bool));
+  int *visited = (int*)calloc(block_size, sizeof(int));
+
   int *my_head = rand_keys + my_id * block_size;
 
   int i = 0;
   while (i < block_size) {
-    int key = my_head[i];
-    int rand_offset = rand() % (block_size - i);
+    int cur = rand() % block_size;
+    while (visited[(++cur) % block_size] > 1); // be sure to find key
 
-    if (!visited[key]){
+    int key = my_head[cur];
+
+    if (visited[cur] == 0){
       PRINT("T%d: put [ key = %d]\n", my_id, key);
       cskiplist_put(cskl, key, interval_new(key, key + 10));
-
-      visited[key] = true;
-      exchange_int(&my_head[i], &my_head[i+rand_offset]);
-    }else{
+      visited[cur] = 1;
+    }else if (visited[cur] == 1){
       PRINT("T%d: delete [ key = %d]\n", my_id, key);
       cskiplist_delete_node(cskl, key);
+      visited[cur] = 2;
       i++;
     }
   }
@@ -266,13 +264,17 @@ run_test
 #pragma omp parallel
   {
     num_threads = omp_get_num_threads();
-    test(cskl, rand_keys, num_range);
+    for (int iter = 0; iter < ROUNDS; ++iter) {
+      test(cskl, rand_keys, num_range);
+    }
   }
   printf("%d thread(s) TIME = %f\n", num_threads, timer_elapsed());
 
 
   timer_start();
-  test(new_cskl, rand_keys, num_range);
+  for (int iter = 0; iter < ROUNDS; ++iter) {
+    test(new_cskl, rand_keys, num_range);
+  }
   printf("Serial TIME = %f\n", timer_elapsed());
 
 #if DEBUG
