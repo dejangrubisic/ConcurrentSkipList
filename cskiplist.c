@@ -51,7 +51,6 @@
 
 typedef struct{
   csklnode_t **ptrs; // pointer for each level of previous node
-  csklnode_t **old_nexts; // each level nexts
 }cskl_prev_nodes_t;
 
 static cskl_prev_nodes_t *
@@ -63,7 +62,6 @@ new_prev_nodes
 {
   cskl_prev_nodes_t *prev_nodes = (cskl_prev_nodes_t *)m_alloc(sizeof(cskl_prev_nodes_t));
   prev_nodes->ptrs = (csklnode_t **) m_alloc(sizeof(csklnode_t *) * max_height);
-  prev_nodes->old_nexts = (csklnode_t **) m_alloc(sizeof(csklnode_t *) * max_height);
   return prev_nodes;
 }
 
@@ -158,7 +156,7 @@ cskipnode_next_alive
     return NULL;
 
   node = atomic_load(&node->nexts[lev]);
-  while (node != NULL && atomic_load(&node->item) != NULL){
+  while (node != NULL && atomic_load(&node->item) == NULL){
     node = atomic_load(&node->nexts[lev]);
   }
   return node;
@@ -227,8 +225,6 @@ cskip_find_prev_nodes
       cur_node = cskipnode_next(prev_node, lev);
     }
     prev_nodes->ptrs[lev] = prev_node;
-    prev_nodes->old_nexts[lev] = atomic_load(&prev_node->nexts[lev]);
-
   }
   return prev_nodes;
 }
@@ -353,7 +349,6 @@ cskiplist_put_specific
   }
 
   free(prev_nodes->ptrs);
-  free(prev_nodes->old_nexts);
 }
 
 

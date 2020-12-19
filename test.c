@@ -36,8 +36,9 @@
 #define PRINT(...)
 #endif
 
-#define ROUNDS 1000
-#define MAX_HEIGHT 4
+#define ROUNDS 6400
+#define NUM_RANGE 256
+#define MAX_HEIGHT 8
 
 #define KNRM  "\x1B[0m"
 #define KRED  "\x1B[31m"
@@ -160,7 +161,7 @@ test_insert
 #pragma omp for
   for (int i = 0; i < num_range; i++) {
 
-  PRINT("%d, ", rand_keys[i]);
+    PRINT("%d, ", rand_keys[i]);
 
     cskiplist_put(cskl, rand_keys[i], interval_new(rand_keys[i], rand_keys[i] + 10));
   }
@@ -210,6 +211,7 @@ test_random
   {
     PRINT("RANDOM TEST\n\n");
   }
+  num_range = num_range / 2;
 
   // keys are going from 0 to num_range
   int my_id = omp_get_thread_num();
@@ -305,7 +307,7 @@ main
   char **argv
 )
 {
-  int num_range = 200;
+  int num_range = NUM_RANGE;
 
   cskiplist_t *cskl = cskiplist_create(MAX_HEIGHT, &malloc, &interval_copy, interval_compare);
 
