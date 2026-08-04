@@ -1,6 +1,6 @@
 # ConcurrentSkipList
 
-A lock free concurrent skip list in C, built on C11 atomics and benchmarked with OpenMP against a serial baseline. Written for COMP522 (Multi-core Computing) at Rice University; the design and measurements are documented in the accompanying [project report (PDF)](https://dejangrubisic.github.io/pub/projects/concurrent_skiplist.pdf).
+A lock free concurrent skip list in C, built on C11 atomics and benchmarked with OpenMP against a serial baseline. Written for COMP522 (Multi-core Computing) at Rice University; the design and measurements are documented in the accompanying [project report (PDF)](concurrent_skiplist_report.pdf).
 
 ## Problem
 
